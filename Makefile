@@ -7,7 +7,7 @@ MAIN_TARGET = main
 TESTS_TARGET = tests
 
 # Object files
-FS_OBJS = fs.o mkfs.o
+FS_OBJS = fs.o mkfs.o helpers.o
 
 MAIN_OBJS = main.o $(FS_OBJS)
 TESTS_OBJS = tests.o $(FS_OBJS)
@@ -27,14 +27,17 @@ $(TESTS_TARGET): $(TESTS_OBJS)
 main.o: main.c fs.h mkfs.h
 	$(CC) $(CFLAGS) -c main.c
 
-tests.o: tests.c fs.h mkfs.h
+tests.o: tests.c fs.h mkfs.h helpers.h
 	$(CC) $(CFLAGS) -c tests.c
 
 fs.o: fs.c fs.h
 	$(CC) $(CFLAGS) -c fs.c
 
-mkfs.o: mkfs.c mkfs.h
+mkfs.o: mkfs.c mkfs.h helpers.h
 	$(CC) $(CFLAGS) -c mkfs.c
+
+helpers.o: helpers.c helpers.h
+	$(CC) $(CFLAGS) -c helpers.c
 
 # Clean up
 clean:
