@@ -274,16 +274,9 @@ int test_superblock_validity(const char *disk_name) {
         return -1;
     }
     
-    // Test root inode
-    if (sb.root_inode != 0) {
-        printf("    ✗ Invalid root inode: %u (expected 0)\n", sb.root_inode);
-        close(fd);
-        return -1;
-    }
-    
-    // Test next free inode
-    if (sb.next_free_inode != 1) {
-        printf("    ✗ Invalid next free inode: %u (expected 1)\n", sb.next_free_inode);
+    // Test used inodes (should be 1 after root directory creation)
+    if (sb.num_used_inodes != 1) {
+        printf("    ✗ Invalid used inodes: %u (expected 1)\n", sb.num_used_inodes);
         close(fd);
         return -1;
     }
@@ -333,10 +326,10 @@ int test_filesystem_layout(const char *disk_name, size_t expected_disk_size, siz
     }
     
     // Test layout consistency
-    size_t calculated_total = 1 + sb.num_bitmap_blocks + sb.num_inode_blocks + sb.num_data_blocks;
+    size_t calculated_total = 1 + sb.num_inode_bitmap_blocks + sb.num_data_bitmap_blocks + sb.num_inode_table_blocks + sb.num_data_blocks;
     if (calculated_total != sb.num_total_blocks) {
-        printf("    ✗ Layout inconsistency: 1 + %u + %u + %u = %zu != %u\n",
-               sb.num_bitmap_blocks, sb.num_inode_blocks, sb.num_data_blocks,
+        printf("    ✗ Layout inconsistency: 1 + %u + %u + %u + %u = %zu != %u\n",
+               sb.num_inode_bitmap_blocks, sb.num_data_bitmap_blocks, sb.num_inode_table_blocks, sb.num_data_blocks,
                calculated_total, sb.num_total_blocks);
         close(fd);
         return -1;
@@ -362,13 +355,145 @@ int test_inode_table_initialization(const char *disk_name) {
     }
     
     // Seek to inode table
-    if (lseek(fd, BLOCK_SIZE + sb.num_bitmap_blocks * BLOCK_SIZE, SEEK_SET) == -1) {
+    if (lseek(fd, BLOCK_SIZE + sb.num_inode_bitmap_blocks * BLOCK_SIZE + sb.num_data_bitmap_blocks * BLOCK_SIZE, SEEK_SET) == -1) {
         printf("    ✗ Failed to seek to inode table\n");
         close(fd);
         return -1;
     }
     
-    // Read first inode (should be root directory)
+    // Test that inode table is properly initialized (all inodes should be zeroed except root)
+    // Read a few inodes to verify they are zeroed (except inode 0 which is the root)
+    for (int i = 1; i < 5 && i < (int)sb.num_max_inodes; i++) {
+        if (lseek(fd, i * sizeof(inode_t), SEEK_CUR) == -1) {
+            printf("    ✗ Failed to seek to inode %d\n", i);
+            close(fd);
+            return -1;
+        }
+        
+        inode_t test_inode;
+        if (read(fd, &test_inode, sizeof(test_inode)) != sizeof(test_inode)) {
+            printf("    ✗ Failed to read inode %d\n", i);
+            close(fd);
+            return -1;
+        }
+        
+        // All inodes except root should be zeroed
+        if (test_inode.size != 0 || test_inode.nlinks != 0 || 
+            test_inode.atime != 0 || test_inode.mtime != 0 || test_inode.ctime != 0) {
+            printf("    ✗ Inode %d should be zeroed, but has non-zero values\n", i);
+            close(fd);
+            return -1;
+        }
+    }
+    
+    printf("    ✓ Inode table initialized correctly (free inodes are zeroed)\n");
+    close(fd);
+    return 0;
+}
+
+int test_bitmap_initialization(const char *disk_name) {
+    int fd = open(disk_name, O_RDONLY);
+    if (fd < 0) {
+        printf("    ✗ Failed to open disk file\n");
+        return -1;
+    }
+    
+    superblock_t sb;
+    if (read(fd, &sb, sizeof(sb)) != sizeof(sb)) {
+        printf("    ✗ Failed to read superblock\n");
+        close(fd);
+        return -1;
+    }
+    
+    // Seek to data bitmap (after inode bitmap)
+    if (lseek(fd, BLOCK_SIZE + sb.num_inode_bitmap_blocks * BLOCK_SIZE, SEEK_SET) == -1) {
+        printf("    ✗ Failed to seek to data bitmap\n");
+        close(fd);
+        return -1;
+    }
+    
+    // Read data bitmap data
+    size_t bitmap_size = sb.num_data_bitmap_blocks * BLOCK_SIZE;
+    char *bitmap_data = malloc(bitmap_size);
+    if (!bitmap_data) {
+        printf("    ✗ Failed to allocate memory for bitmap\n");
+        close(fd);
+        return -1;
+    }
+    
+    if (read(fd, bitmap_data, bitmap_size) != (ssize_t)bitmap_size) {
+        printf("    ✗ Failed to read bitmap data\n");
+        free(bitmap_data);
+        close(fd);
+        return -1;
+    }
+    
+    // Test that metadata blocks are marked as used
+    size_t num_metadata_blocks = 1 + sb.num_inode_bitmap_blocks + sb.num_data_bitmap_blocks;
+    for (size_t i = 0; i < num_metadata_blocks; i++) {
+        int block_status = bitmapget(bitmap_data, sb.num_total_blocks, i);
+        if (block_status != 1) {
+            printf("    ✗ Block %zu (metadata) should be marked as used, got %d\n", i, block_status);
+            free(bitmap_data);
+            close(fd);
+            return -1;
+        }
+    }
+    
+    // Test that data blocks are free (0)
+    int free_blocks = 0;
+    size_t start_data_blocks = num_metadata_blocks + sb.num_inode_table_blocks;
+    size_t end_test = (start_data_blocks + 100 < sb.num_total_blocks) ? start_data_blocks + 100 : sb.num_total_blocks;
+    
+    for (size_t i = start_data_blocks; i < end_test; i++) {
+        int status = bitmapget(bitmap_data, sb.num_total_blocks, i);
+        if (status == 0) {
+            free_blocks++;
+        } else if (status < 0) {
+            printf("    ✗ Error reading bitmap at index %zu\n", i);
+            free(bitmap_data);
+            close(fd);
+            return -1;
+        }
+    }
+    
+    // Most data blocks should be free initially
+    size_t num_data_blocks_tested = end_test - start_data_blocks;
+    if (num_data_blocks_tested > 0 && free_blocks < (int)(num_data_blocks_tested * 0.9)) {
+        printf("    ✗ Too few free data blocks found: %d out of %zu\n", free_blocks, num_data_blocks_tested);
+        free(bitmap_data);
+        close(fd);
+        return -1;
+    }
+    
+    printf("    ✓ Bitmap initialized correctly (metadata blocks used, data blocks free)\n");
+    free(bitmap_data);
+    close(fd);
+    return 0;
+}
+
+int test_root_directory_creation(const char *disk_name) {
+    int fd = open(disk_name, O_RDONLY);
+    if (fd < 0) {
+        printf("    ✗ Failed to open disk file\n");
+        return -1;
+    }
+    
+    superblock_t sb;
+    if (read(fd, &sb, sizeof(sb)) != sizeof(sb)) {
+        printf("    ✗ Failed to read superblock\n");
+        close(fd);
+        return -1;
+    }
+    
+    // Seek to inode table
+    if (lseek(fd, BLOCK_SIZE + sb.num_inode_bitmap_blocks * BLOCK_SIZE + sb.num_data_bitmap_blocks * BLOCK_SIZE, SEEK_SET) == -1) {
+        printf("    ✗ Failed to seek to inode table\n");
+        close(fd);
+        return -1;
+    }
+    
+    // Read root inode (inode 0)
     inode_t root_inode;
     if (read(fd, &root_inode, sizeof(root_inode)) != sizeof(root_inode)) {
         printf("    ✗ Failed to read root inode\n");
@@ -389,114 +514,14 @@ int test_inode_table_initialization(const char *disk_name) {
         return -1;
     }
     
-    printf("    ✓ Inode table initialized correctly\n");
-    close(fd);
-    return 0;
-}
-
-int test_bitmap_initialization(const char *disk_name) {
-    int fd = open(disk_name, O_RDONLY);
-    if (fd < 0) {
-        printf("    ✗ Failed to open disk file\n");
-        return -1;
-    }
-    
-    superblock_t sb;
-    if (read(fd, &sb, sizeof(sb)) != sizeof(sb)) {
-        printf("    ✗ Failed to read superblock\n");
+    // Test that root inode has valid timestamps
+    if (root_inode.atime == 0 || root_inode.mtime == 0 || root_inode.ctime == 0) {
+        printf("    ✗ Root inode timestamps should be set\n");
         close(fd);
         return -1;
     }
     
-    // Seek to bitmap
-    if (lseek(fd, BLOCK_SIZE, SEEK_SET) == -1) {
-        printf("    ✗ Failed to seek to bitmap\n");
-        close(fd);
-        return -1;
-    }
-    
-    // Read bitmap data
-    size_t bitmap_size = sb.num_bitmap_blocks * BLOCK_SIZE;
-    char *bitmap_data = malloc(bitmap_size);
-    if (!bitmap_data) {
-        printf("    ✗ Failed to allocate memory for bitmap\n");
-        close(fd);
-        return -1;
-    }
-    
-    if (read(fd, bitmap_data, bitmap_size) != (ssize_t)bitmap_size) {
-        printf("    ✗ Failed to read bitmap data\n");
-        free(bitmap_data);
-        close(fd);
-        return -1;
-    }
-    
-    // Test that block 0 (superblock) is marked as used
-    int block0_status = bitmapget(bitmap_data, sb.num_total_blocks, 0);
-    if (block0_status != 1) {
-        printf("    ✗ Block 0 (superblock) should be marked as used, got %d\n", block0_status);
-        free(bitmap_data);
-        close(fd);
-        return -1;
-    }
-    
-    // Test that other blocks are free (0)
-    int free_blocks = 0;
-    for (size_t i = 1; i < sb.num_total_blocks && i < 100; i++) { // Test first 100 blocks
-        int status = bitmapget(bitmap_data, sb.num_total_blocks, i);
-        if (status == 0) {
-            free_blocks++;
-        } else if (status < 0) {
-            printf("    ✗ Error reading bitmap at index %zu\n", i);
-            free(bitmap_data);
-            close(fd);
-            return -1;
-        }
-    }
-    
-    // Most blocks should be free initially
-    if (free_blocks < 90) { // At least 90% should be free
-        printf("    ✗ Too few free blocks found: %d\n", free_blocks);
-        free(bitmap_data);
-        close(fd);
-        return -1;
-    }
-    
-    printf("    ✓ Bitmap initialized correctly (block 0 used, others free)\n");
-    free(bitmap_data);
-    close(fd);
-    return 0;
-}
-
-int test_root_directory_creation(const char *disk_name) {
-    int fd = open(disk_name, O_RDONLY);
-    if (fd < 0) {
-        printf("    ✗ Failed to open disk file\n");
-        return -1;
-    }
-    
-    superblock_t sb;
-    if (read(fd, &sb, sizeof(sb)) != sizeof(sb)) {
-        printf("    ✗ Failed to read superblock\n");
-        close(fd);
-        return -1;
-    }
-    
-    // Test that root inode is properly set in superblock
-    if (sb.root_inode != 0) {
-        printf("    ✗ Root inode should be 0, got %u\n", sb.root_inode);
-        close(fd);
-        return -1;
-    }
-    
-    // Test that next free inode is set correctly
-    if (sb.next_free_inode != 1) {
-        printf("    ✗ Next free inode should be 1, got %u\n", sb.next_free_inode);
-        close(fd);
-        return -1;
-    }
-    
-    printf("    ✓ Root directory created correctly\n");
+    printf("    ✓ Root directory inode structure is correct\n");
     close(fd);
     return 0;
 }

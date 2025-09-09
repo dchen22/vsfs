@@ -87,3 +87,38 @@ int bitmapclear(char *bitmap, size_t nbits) {
     
     return 0;
 }
+
+// Find the first available bit, set it to 1, and return its index
+int bitmapalloc(char *bitmap, size_t nbits) {
+    // Error checking
+    if (bitmap == NULL) {
+        fprintf(stderr, "bitmapalloc: bitmap is NULL\n");
+        return -1;
+    }
+    
+    if (nbits == 0) {
+        fprintf(stderr, "bitmapalloc: nbits is 0\n");
+        return -1;
+    }
+    
+    // Search for the first free bit (0)
+    for (size_t i = 0; i < nbits; i++) {
+        int bit_value = bitmapget(bitmap, nbits, i);
+        if (bit_value < 0) {
+            fprintf(stderr, "bitmapalloc: error reading bit %zu\n", i);
+            return -1;
+        }
+        
+        if (bit_value == 0) {
+            // Found a free bit, set it to 1
+            if (bitmapset(bitmap, nbits, i, true) < 0) {
+                fprintf(stderr, "bitmapalloc: error setting bit %zu\n", i);
+                return -1;
+            }
+            return (int)i;  // Return the index of the allocated bit
+        }
+    }
+    
+    // No free bits found
+    return -1;
+}

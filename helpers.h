@@ -23,4 +23,7 @@ int bitmapclear(char *bitmap, size_t nbits);
 // Initialize the entire bitmap (set all bits to 0)
 int bitmapinit(char *bitmap, size_t nbits);
 
+// Find the first available bit, set it to 1, and return its index (-1 if full)
+int bitmapalloc(char *bitmap, size_t nbits);
+
 #endif // HELPERS_H

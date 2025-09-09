@@ -8,11 +8,23 @@
 
 #define VSFS_MAGIC 0x56534653 // "VSFS" in hex
 
-fs_ctx_t fs_ctx;
+// Global filesystem pointers
+superblock_t *sb = NULL;
+char *inode_bitmap = NULL;
+char *data_bitmap = NULL;
+char *inode_table = NULL;
+char *data_section = NULL;
 
 int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
+    assert(sizeof(superblock_t) <= BLOCK_SIZE);   // superblock needs to fit in a block
+
     if (disk_size < 2 * BLOCK_SIZE) {   // superblock and at least 1 bitmap block
         fprintf(stderr, "Disk size is too small\n");
+        return -1;
+    }
+
+    if (max_files == 0) {
+        fprintf(stderr, "Max files is 0\n");
         return -1;
     }
 
@@ -40,26 +52,32 @@ int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
     memset(map, 0, disk_size); // Initialize the mapped memory to zero
 
     // Calculate layout for the filesystem
-    size_t num_total_blocks, num_inodes, num_data_blocks, num_bitmap_blocks;
-    if (calculate_layout(map, disk_size, max_files, &num_total_blocks, &num_inodes, &num_data_blocks, &num_bitmap_blocks) < 0) {
+    size_t num_total_blocks, num_inode_table_blocks, num_data_blocks, num_inode_bitmap_blocks, num_data_bitmap_blocks;
+    if (calculate_layout(map, disk_size, max_files, &num_total_blocks, &num_inode_table_blocks, &num_data_blocks, &num_data_bitmap_blocks, &num_inode_bitmap_blocks) < 0) {
         cleanup_disk(map, disk_size, fd);
         return -1;
     }
 
     // Write superblock
-    if (write_superblock(map, disk_size, max_files, num_total_blocks, num_inodes, num_data_blocks, num_bitmap_blocks) < 0) {
+    if (write_superblock(map, disk_size, max_files, num_total_blocks, num_inode_table_blocks, num_data_blocks, num_inode_bitmap_blocks, num_data_bitmap_blocks) < 0) {
         cleanup_disk(map, disk_size, fd);
         return -1;
     }
 
     // Initialize inode table
-    if (initialize_inode_table(num_inodes) < 0) {
+    if (initialize_inode_table() < 0) {
+        cleanup_disk(map, disk_size, fd);
+        return -1;
+    }
+
+    // Initialize inode bitmap
+    if (initialize_inode_bitmap() < 0) {
         cleanup_disk(map, disk_size, fd);
         return -1;
     }
 
     // Initialize data bitmap
-    if (initialize_bitmap(num_bitmap_blocks) < 0) {
+    if (initialize_data_bitmap() < 0) {
         cleanup_disk(map, disk_size, fd);
         return -1;
     }
@@ -76,8 +94,8 @@ int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
 }
 
 int write_superblock(char *disk_map, size_t disk_size, size_t max_files, 
-    size_t num_total_blocks, size_t num_inode_blocks, size_t num_data_blocks, 
-    size_t num_bitmap_blocks) {
+    size_t num_total_blocks, size_t num_inode_table_blocks, size_t num_data_blocks, 
+    size_t num_inode_bitmap_blocks, size_t num_data_bitmap_blocks) {
     // TODO: Implement superblock writing
     // - Create superblock_t structure
     // - Set magic number to VSFS_MAGIC
@@ -90,22 +108,21 @@ int write_superblock(char *disk_map, size_t disk_size, size_t max_files,
     // - Write superblock to first block of disk_map
     // - Return 0 on success, -1 on error
 
-    superblock_t superblock;
-    assert(sizeof(superblock) <= BLOCK_SIZE);   // superblock needs to fit in a block
-    superblock.magic = VSFS_MAGIC;
-    superblock.disk_size = disk_size;
-    superblock.block_size = BLOCK_SIZE;
-    superblock.num_total_blocks = num_total_blocks;
-    superblock.num_inode_blocks = num_inode_blocks;
-    superblock.num_data_blocks = num_data_blocks;
-    superblock.num_bitmap_blocks = num_bitmap_blocks;
-    superblock.num_max_inodes = max_files;
-    superblock.next_free_inode = 1;
-    superblock.num_free_blocks = num_data_blocks;
-    superblock.root_inode = 0;
-    memcpy(disk_map, &superblock, sizeof(superblock));
-
-    fs_ctx.sb = superblock;
+    // Set superblock pointer to point to the first block of disk_map
+    sb = (superblock_t *)disk_map;
+    
+    // Initialize superblock fields
+    sb->magic = VSFS_MAGIC;
+    sb->disk_size = disk_size;
+    sb->block_size = BLOCK_SIZE;
+    sb->num_total_blocks = num_total_blocks;
+    sb->num_inode_table_blocks = num_inode_table_blocks;
+    sb->num_data_blocks = num_data_blocks;
+    sb->num_data_bitmap_blocks = num_data_bitmap_blocks;
+    sb->num_inode_bitmap_blocks = num_inode_bitmap_blocks;
+    sb->num_max_inodes = max_files;
+    sb->num_used_inodes = 0; 
+    sb->num_free_blocks = num_data_blocks;
     
     return 0;
 }
@@ -116,31 +133,48 @@ int initialize_inode_table() {
     // - Initialize all inodes to zero (already done by memset)
     // - All inodes are free initially (mode = 0 means free)
     // - Set up inode 0 for root directory (will be done in create_root_directory)
-    // - No inode bitmap needed - using fixed allocation with next_free_inode counter
+    // - Inode bitmap is now used for proper inode allocation/deallocation
     // - Return 0 on success, -1 on error
 
-    memset(fs_ctx.inode_table, 0, fs_ctx.sb.num_inode_blocks * BLOCK_SIZE);
+    memset(inode_table, 0, sb->num_inode_table_blocks * BLOCK_SIZE);
     
     return 0;
 }
 
-int initialize_bitmap() {
+int initialize_data_bitmap() {
     // TODO: Implement data bitmap initialization
-    // - Calculate starting block for data bitmap (after inode table)
+    // - Calculate starting block for data bitmap (after inode bitmap)
     // - Initialize bitmap to all zeros (all blocks free)
     // - Mark block 0 as used (if needed for special purposes)
     // - Each bit represents one data block (0 = free, 1 = used)
     // - Return 0 on success, -1 on error
 
-    // Clear the entire bitmap (set all bits to 0)
-    if (bitmapclear(fs_ctx.bitmap, fs_ctx.sb.num_total_blocks) < 0) {
+    // Clear the entire data bitmap (set all bits to 0)
+    if (bitmapclear(data_bitmap, sb->num_total_blocks) < 0) {
         return -1;
     }
     
-    // Mark block 0 (superblock) as used
-    if (bitmapset(fs_ctx.bitmap, fs_ctx.sb.num_total_blocks, 0, true) < 0) {
+    // Mark block 0 (superblock) and both bitmaps' blocks as used
+    for (size_t i = 0; i < 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks; i++) {
+        if (bitmapset(data_bitmap, sb->num_total_blocks, i, true) < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int initialize_inode_bitmap() {
+    // TODO: Implement inode bitmap initialization
+    // - Initialize inode bitmap to all zeros (all inodes free)
+    // - Each bit represents one inode (0 = free, 1 = used)
+    // - Return 0 on success, -1 on error
+
+    // Clear the entire inode bitmap (set all bits to 0)
+    if (bitmapclear(inode_bitmap, sb->num_max_inodes) < 0) {
         return -1;
     }
+    
 
     return 0;
 }
@@ -158,6 +192,8 @@ int create_root_directory() {
     // - Update superblock next_free_inode to 1 (since inode 0 is now used)
     // - Return 0 on success, -1 on error
 
+    assert(sb->num_used_inodes < sb->num_max_inodes);
+
     inode_t root_inode;
     root_inode.size = 0;
     root_inode.atime = time(NULL);
@@ -166,41 +202,54 @@ int create_root_directory() {
     root_inode.nlinks = 2;
     root_inode.blocks[0] = 0;   // point at superblock to imply unused
     root_inode.indirect = 0;    // point at first inode to imply unused
-    memcpy(fs_ctx.inode_table, &root_inode, sizeof(root_inode));
-    
+
+    if (bitmapalloc(inode_bitmap, sb->num_max_inodes) != 0) {
+        return -1;
+    }
+    memcpy(inode_table, &root_inode, sizeof(root_inode));
+    sb->num_used_inodes++;
+
+    // Mark inode 0 as used in the inode bitmap (already done in initialize_inode_bitmap)
+    // No need to do it again here
+
     return 0;
 }
 
 int calculate_layout(char *disk_map, size_t disk_size, size_t max_files, 
-                    size_t *num_total_blocks, size_t *num_inode_blocks, size_t *num_data_blocks, 
-                    size_t *num_bitmap_blocks) {
+                    size_t *num_total_blocks, size_t *num_inode_table_blocks, size_t *num_data_blocks, 
+                    size_t *num_data_bitmap_blocks, size_t *num_inode_bitmap_blocks) {
     // TODO: Implement layout calculation
     // - Calculate total_blocks from disk_size / BLOCK_SIZE
     // - Reserve 1 block for superblock
     // - Calculate num_inodes based on max_files (with some overhead)
     // - Calculate inode_blocks = (num_inodes * INODE_SIZE) / BLOCK_SIZE
-    // - Calculate num_data_blocks = total_blocks - 1 - inode_blocks - bitmap_blocks
-    // - Calculate num_bitmap_blocks = (num_data_blocks + 7) / 8 / BLOCK_SIZE
-    // - The bitmap is a bitmap of all blocks in the disk, including superblock and inode table
+    // - Calculate num_inode_bitmap_blocks = ceildiv(max_inodes, BLOCK_SIZE * 8)
+    // - Calculate num_data_bitmap_blocks = ceildiv(total_blocks, BLOCK_SIZE * 8)
+    // - Calculate num_data_blocks = total_blocks - 1 - inode_blocks - inode_bitmap_blocks - data_bitmap_blocks
+    // - The data bitmap tracks all blocks in the disk
+    // - The inode bitmap tracks all inodes
     // - Validate that layout fits within disk_size
     // - Set output parameters
     // - Return 0 on success, -1 on error
     size_t num_superblock_blocks = 1;
     *num_total_blocks = disk_size / BLOCK_SIZE;
-    *num_bitmap_blocks = ceildiv(*num_total_blocks, BLOCK_SIZE * 8);
-    *num_inode_blocks = (max_files * INODE_SIZE) / BLOCK_SIZE;
-    *num_data_blocks = *num_total_blocks - num_superblock_blocks - *num_inode_blocks - *num_bitmap_blocks;
+    *num_inode_bitmap_blocks = ceildiv(max_files, BLOCK_SIZE * 8);
+    *num_data_bitmap_blocks = ceildiv(*num_total_blocks, BLOCK_SIZE * 8);
+    *num_inode_table_blocks = (max_files * INODE_SIZE) / BLOCK_SIZE;
+    *num_data_blocks = *num_total_blocks - num_superblock_blocks - *num_inode_table_blocks - *num_inode_bitmap_blocks - *num_data_bitmap_blocks;
 
-    assert(*num_bitmap_blocks >= 1);    // superblock must exist, so at least 1 bitmap block to keep track of superblock
-    assert(*num_total_blocks == num_superblock_blocks + *num_bitmap_blocks + *num_inode_blocks + *num_data_blocks);
+    assert(*num_data_bitmap_blocks >= 1);    // superblock must exist, so at least 1 bitmap block to keep track of superblock
+    assert(*num_inode_bitmap_blocks >= 1);   // at least 1 inode bitmap block
+    assert(*num_total_blocks == num_superblock_blocks + *num_inode_bitmap_blocks + *num_data_bitmap_blocks + *num_inode_table_blocks + *num_data_blocks);
 
-    fs_ctx.disk_map = disk_map;
-    fs_ctx.bitmap = disk_map + BLOCK_SIZE;
-    fs_ctx.inode_table = disk_map + BLOCK_SIZE + *num_bitmap_blocks * BLOCK_SIZE;
-    fs_ctx.data_section = disk_map + BLOCK_SIZE + *num_bitmap_blocks * BLOCK_SIZE + *num_inode_blocks * BLOCK_SIZE;
+    inode_bitmap = disk_map + BLOCK_SIZE;
+    data_bitmap = inode_bitmap + *num_inode_bitmap_blocks * BLOCK_SIZE;
+    inode_table = data_bitmap + *num_data_bitmap_blocks * BLOCK_SIZE;
+    data_section = inode_table + *num_inode_table_blocks * BLOCK_SIZE;
 
     return 0;
 }
+
 
 void cleanup_disk(char *disk_map, size_t disk_size, int fd) {
     // Unmap the memory-mapped file
@@ -217,6 +266,10 @@ void cleanup_disk(char *disk_map, size_t disk_size, int fd) {
         }
     }
     
-    // Clear the filesystem context
-    memset(&fs_ctx, 0, sizeof(fs_ctx_t));
+    // Clear the global filesystem pointers
+    sb = NULL;
+    inode_bitmap = NULL;
+    data_bitmap = NULL;
+    inode_table = NULL;
+    data_section = NULL;
 }
