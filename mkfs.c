@@ -156,6 +156,10 @@ int initialize_data_bitmap() {
     
     // Mark block 0 (superblock) and both bitmaps' blocks as used
     for (size_t i = 0; i < 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks; i++) {
+        // debug
+        if (sb->num_total_blocks <= i) {
+            printf("debug");
+        }
         if (bitmapset(data_bitmap, sb->num_total_blocks, i, true) < 0) {
             return -1;
         }
@@ -236,6 +240,14 @@ int calculate_layout(char *disk_map, size_t disk_size, size_t max_files,
     *num_inode_bitmap_blocks = ceildiv(max_files, BLOCK_SIZE * 8);
     *num_data_bitmap_blocks = ceildiv(*num_total_blocks, BLOCK_SIZE * 8);
     *num_inode_table_blocks = (max_files * INODE_SIZE) / BLOCK_SIZE;
+
+    // if superblock, bitmaps, inode table don't fit, then our disk
+    // doesn't have enough space to accomodate this number of inodes
+    if (num_superblock_blocks + *num_inode_bitmap_blocks 
+        + *num_data_bitmap_blocks + *num_inode_table_blocks > *num_total_blocks) {
+        return -1;
+    }
+
     *num_data_blocks = *num_total_blocks - num_superblock_blocks - *num_inode_table_blocks - *num_inode_bitmap_blocks - *num_data_bitmap_blocks;
 
     assert(*num_data_bitmap_blocks >= 1);    // superblock must exist, so at least 1 bitmap block to keep track of superblock

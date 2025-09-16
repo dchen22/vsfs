@@ -19,6 +19,9 @@ int test_bitmap_initialization(const char *disk_name);
 int test_root_directory_creation(const char *disk_name);
 int test_disk_file_creation(const char *disk_name, size_t expected_size);
 
+// Helper function to calculate minimum blocks needed for a filesystem
+size_t calculate_minimum_blocks(size_t max_files);
+
 // Test cases
 int test_basic_formatting();
 int test_different_disk_sizes();
@@ -129,27 +132,68 @@ int test_basic_formatting() {
 
 int test_different_disk_sizes() {
     const char *disk_name = "test_disk_sizes";
-    // All sizes must be >= 2 * BLOCK_SIZE (minimum requirement)
-    size_t test_sizes[] = {BLOCK_SIZE * 2, BLOCK_SIZE * 10, BLOCK_SIZE * 50, BLOCK_SIZE * 200, BLOCK_SIZE * 1000};
-    size_t max_files = 50;
     
-    for (int i = 0; i < 5; i++) {
+    printf("  Beginning tests with block size = %d, inode size = %d\n\n", BLOCK_SIZE, INODE_SIZE);
+    
+    // Test different disk sizes with appropriate max_files for each
+    struct {
+        size_t disk_size;
+        size_t max_files;
+        bool should_succeed;
+    } test_cases[] = {
+        {BLOCK_SIZE * 4, 1, true},      // Minimum size: superblock + inode_bitmap + data_bitmap + inode_table (1 inode)
+        {BLOCK_SIZE * 2, 1, false},     // Too small for even 1 file
+        {BLOCK_SIZE * 2, 10, false},    // Too many files for 2 blocks
+        {BLOCK_SIZE * 10, 10, true},    // Reasonable size for 10 files
+        {BLOCK_SIZE * 50, 50, true},    // Good size for 50 files
+        {BLOCK_SIZE * 200, 100, true},  // Large disk with moderate files
+        {BLOCK_SIZE * 1000, 500, true}  // Very large disk
+    };
+    
+    for (int i = 0; i < 7; i++) {
         unlink(disk_name);
         
-        printf("  Testing disk size: %zu bytes (%zu blocks)\n", 
-               test_sizes[i], test_sizes[i] / BLOCK_SIZE);
+        size_t available_blocks = test_cases[i].disk_size / BLOCK_SIZE;
+        size_t min_blocks = calculate_minimum_blocks(test_cases[i].max_files);
         
-        if (format_disk(disk_name, test_sizes[i], max_files) < 0) {
-            printf("    ✗ Failed to format disk with size %zu\n", test_sizes[i]);
-            return -1;
+        // Calculate individual components for detailed output
+        size_t num_superblock_blocks = 1;
+        size_t num_inode_bitmap_blocks = ceildiv(test_cases[i].max_files, BLOCK_SIZE * 8);
+        size_t num_inode_table_blocks = ceildiv(test_cases[i].max_files * INODE_SIZE, BLOCK_SIZE);
+        size_t num_data_bitmap_blocks = ceildiv(min_blocks, BLOCK_SIZE * 8);
+        
+        printf("  Test %d: Let disk size = %zu, thus number of blocks = %zu. Let max files = %zu\n", 
+               i, test_cases[i].disk_size, available_blocks, test_cases[i].max_files);
+        printf("    Requires: %zu superblock, %zu inode bitmap blocks (ceil(%zu / %zu)), %zu data bitmap blocks (ceil(%zu / %zu)), %zu inode table blocks (ceil(%zu / %zu))\n",
+               num_superblock_blocks, 
+               num_inode_bitmap_blocks, test_cases[i].max_files, (size_t)(BLOCK_SIZE * 8),
+               num_data_bitmap_blocks, min_blocks, (size_t)(BLOCK_SIZE * 8),
+               num_inode_table_blocks, test_cases[i].max_files * INODE_SIZE, (size_t)BLOCK_SIZE);
+        printf("    Total required: %zu blocks, available: %zu blocks\n", min_blocks, available_blocks);
+        
+        int result = format_disk(disk_name, test_cases[i].disk_size, test_cases[i].max_files);
+        
+        if (test_cases[i].should_succeed) {
+            if (result < 0) {
+                printf("    ✗ Test FAILS - Failed to format disk (should succeed)\n");
+                return -1;
+            }
+            
+            if (test_filesystem_layout(disk_name, test_cases[i].disk_size, test_cases[i].max_files) != 0) {
+                printf("    ✗ Test FAILS - Filesystem layout test failed\n");
+                return -1;
+            }
+            
+            printf("    ✓ Test PASSES - Disk formatted successfully\n");
+        } else {
+            if (result >= 0) {
+                printf("    ✗ Test FAILS - Should have failed to format disk (too many files for disk size)\n");
+                return -1;
+            }
+            
+            printf("    ✓ Test PASSES - Correctly failed to format disk (insufficient space)\n");
         }
-        
-        if (test_filesystem_layout(disk_name, test_sizes[i], max_files) != 0) {
-            printf("    ✗ Filesystem layout test failed for size %zu\n", test_sizes[i]);
-            return -1;
-        }
-        
-        printf("    ✓ Disk size %zu formatted successfully\n", test_sizes[i]);
+        printf("\n");
     }
     
     unlink(disk_name);
@@ -186,10 +230,10 @@ int test_different_max_files() {
 int test_edge_cases() {
     const char *disk_name = "test_disk_edge";
     
-    // Test 1: Minimum disk size (2 * BLOCK_SIZE)
-    printf("  Testing minimum disk size (2 * BLOCK_SIZE)\n");
+    // Test 1: Minimum disk size (4 * BLOCK_SIZE for 1 file)
+    printf("  Testing minimum disk size (4 * BLOCK_SIZE for 1 file)\n");
     unlink(disk_name);
-    if (format_disk(disk_name, BLOCK_SIZE * 2, 1) < 0) {
+    if (format_disk(disk_name, BLOCK_SIZE * 4, 1) < 0) {
         printf("    ✗ Failed to format minimum disk size\n");
         return -1;
     }
@@ -198,8 +242,8 @@ int test_edge_cases() {
     // Test 2: Disk size smaller than minimum (should fail)
     printf("  Testing disk size smaller than minimum (should fail)\n");
     unlink(disk_name);
-    if (format_disk(disk_name, BLOCK_SIZE, 1) == 0) {
-        printf("    ✗ Should have failed with disk size smaller than 2 * BLOCK_SIZE\n");
+    if (format_disk(disk_name, BLOCK_SIZE * 2, 1) == 0) {
+        printf("    ✗ Should have failed with disk size smaller than 4 * BLOCK_SIZE\n");
         return -1;
     }
     printf("    ✓ Correctly failed with disk size smaller than minimum\n");
@@ -524,4 +568,31 @@ int test_root_directory_creation(const char *disk_name) {
     printf("    ✓ Root directory inode structure is correct\n");
     close(fd);
     return 0;
+}
+
+size_t calculate_minimum_blocks(size_t max_files) {
+    // Calculate minimum blocks needed for a filesystem with max_files
+    // This mirrors the logic in calculate_layout() in mkfs.c
+    
+    size_t num_superblock_blocks = 1;
+    size_t num_inode_bitmap_blocks = ceildiv(max_files, BLOCK_SIZE * 8);
+    size_t num_inode_table_blocks = ceildiv(max_files * INODE_SIZE, BLOCK_SIZE);
+    
+    // For data bitmap, we need to know total blocks, so we calculate iteratively
+    // Start with minimum estimate
+    size_t total_blocks = num_superblock_blocks + num_inode_bitmap_blocks + num_inode_table_blocks + 1; // +1 for data bitmap
+    
+    // Recalculate data bitmap with the estimated total
+    size_t num_data_bitmap_blocks = ceildiv(total_blocks, BLOCK_SIZE * 8);
+    
+    // Recalculate total with correct data bitmap size
+    total_blocks = num_superblock_blocks + num_inode_bitmap_blocks + num_inode_table_blocks + num_data_bitmap_blocks;
+    
+    // If data bitmap size changed, recalculate once more
+    size_t new_data_bitmap_blocks = ceildiv(total_blocks, BLOCK_SIZE * 8);
+    if (new_data_bitmap_blocks != num_data_bitmap_blocks) {
+        total_blocks = num_superblock_blocks + num_inode_bitmap_blocks + num_inode_table_blocks + new_data_bitmap_blocks;
+    }
+    
+    return total_blocks;
 }
