@@ -91,6 +91,11 @@ int load_fs(const char *disk_name) {
     return 0;
 }
 
+int read_file(const char *path) {
+    // assume all files are stored in the root directory for now
+    
+}
+
 void unload_fs(void) {
     // Unmap memory
     if (disk_map != NULL && disk_map != MAP_FAILED) {

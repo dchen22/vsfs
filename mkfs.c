@@ -200,11 +200,11 @@ int create_root_directory() {
     assert(sb->num_used_inodes < sb->num_max_inodes);
 
     inode_t root_inode;
+    strcpy(root_inode.name, "root");
     root_inode.size = 0;
-    root_inode.atime = time(NULL);
-    root_inode.mtime = time(NULL);
-    root_inode.ctime = time(NULL);
-    root_inode.nlinks = 2;
+    root_inode.is_directory = true;
+    root_inode.is_allocated = true;
+    root_inode.nlinks = 0;      // not using relative links for now
     root_inode.blocks[0] = 0;   // point at superblock to imply unused
     root_inode.indirect = 0;    // point at first inode to imply unused
 
@@ -223,19 +223,6 @@ int create_root_directory() {
 int calculate_layout(char *disk_map, size_t disk_size, size_t max_files, 
                     size_t *num_total_blocks, size_t *num_inode_table_blocks, size_t *num_data_blocks, 
                     size_t *num_data_bitmap_blocks, size_t *num_inode_bitmap_blocks) {
-    // TODO: Implement layout calculation
-    // - Calculate total_blocks from disk_size / BLOCK_SIZE
-    // - Reserve 1 block for superblock
-    // - Calculate num_inodes based on max_files (with some overhead)
-    // - Calculate inode_blocks = (num_inodes * INODE_SIZE) / BLOCK_SIZE
-    // - Calculate num_inode_bitmap_blocks = ceildiv(max_inodes, BLOCK_SIZE * 8)
-    // - Calculate num_data_bitmap_blocks = ceildiv(total_blocks, BLOCK_SIZE * 8)
-    // - Calculate num_data_blocks = total_blocks - 1 - inode_blocks - inode_bitmap_blocks - data_bitmap_blocks
-    // - The data bitmap tracks all blocks in the disk
-    // - The inode bitmap tracks all inodes
-    // - Validate that layout fits within disk_size
-    // - Set output parameters
-    // - Return 0 on success, -1 on error
     size_t num_superblock_blocks = 1;
     *num_total_blocks = disk_size / BLOCK_SIZE;
     *num_inode_bitmap_blocks = ceildiv(max_files, BLOCK_SIZE * 8);

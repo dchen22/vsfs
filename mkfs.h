@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #define BLOCK_SIZE 4096 // Size of a block in bytes
 #define MAX_FILENAME_LEN 255
@@ -28,10 +29,10 @@ typedef struct {
 
 // VSFS Inode structure
 typedef struct {
+    char name[MAX_FILENAME_LEN]; // File name
     uint32_t size;            // File size in bytes
-    uint32_t atime;           // Access time
-    uint32_t mtime;           // Modification time
-    uint32_t ctime;           // Creation time
+    bool is_directory;        // Whether the file is a directory
+    bool is_allocated;         // check whether this area of memory is actually in use for an inode
     uint32_t nlinks;          // Number of hard links
     uint32_t blocks[12];      // Direct block pointers (12 direct blocks)
     uint32_t indirect;        // Indirect block pointer
