@@ -9,7 +9,6 @@
 #define BLOCK_SIZE 4096 // Size of a block in bytes
 #define MAX_FILENAME_LEN 255
 #define MAX_INODES 1024
-#define INODE_SIZE 64
 
 // VSFS Superblock structure
 typedef struct {
@@ -24,6 +23,7 @@ typedef struct {
     uint32_t num_max_inodes;    // Maximum number of files in the filesystem
     uint32_t num_used_inodes; // Number of used inodes
     uint32_t num_free_blocks;     // Number of free data blocks
+    uint32_t num_used_data_blocks; // Number of used data blocks
 } superblock_t;
 
 // VSFS Inode structure

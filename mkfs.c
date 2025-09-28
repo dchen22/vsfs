@@ -28,7 +28,7 @@ int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
         return -1;
     }
 
-    int fd = open(disk_name, O_RDWR | O_CREAT, 0644);
+    int fd = open(disk_name, O_RDWR | O_CREAT | O_TRUNC, 0644); // will truncate the file if it exists
     if (fd < 0) {
         perror("Failed to open disk");
         return -1; // Return -1 on error
@@ -123,6 +123,7 @@ int write_superblock(char *disk_map, size_t disk_size, size_t max_files,
     sb->num_max_inodes = max_files;
     sb->num_used_inodes = 0; 
     sb->num_free_blocks = num_data_blocks;
+    sb->num_used_data_blocks = 0;
     
     return 0;
 }
@@ -239,7 +240,8 @@ int calculate_layout(char *disk_map, size_t disk_size, size_t max_files,
     *num_total_blocks = disk_size / BLOCK_SIZE;
     *num_inode_bitmap_blocks = ceildiv(max_files, BLOCK_SIZE * 8);
     *num_data_bitmap_blocks = ceildiv(*num_total_blocks, BLOCK_SIZE * 8);
-    *num_inode_table_blocks = (max_files * INODE_SIZE) / BLOCK_SIZE;
+    // *num_inode_table_blocks = (max_files * sizeof(inode_t)) / BLOCK_SIZE;
+    *num_inode_table_blocks = ceildiv(max_files, (int)(BLOCK_SIZE / sizeof(inode_t)));
 
     // if superblock, bitmaps, inode table don't fit, then our disk
     // doesn't have enough space to accomodate this number of inodes
