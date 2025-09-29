@@ -206,8 +206,8 @@ int create_root_directory() {
     root_inode.is_directory = true;
     root_inode.is_allocated = true;
     root_inode.nlinks = 0;      // not using relative links for now
-    root_inode.blocks[0] = 0;   // point at superblock to imply unused
-    root_inode.indirect = 0;    // point at first inode to imply unused
+    root_inode.direct_blocks[0] = 0;   // point at superblock to imply unused
+    root_inode.indirect_block = 0;    // point at first inode to imply unused
 
     if (bitmapalloc(inode_bitmap, sb->num_max_inodes) != 0) {
         return -1;

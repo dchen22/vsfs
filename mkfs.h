@@ -1,3 +1,6 @@
+#ifndef MKFS_H
+#define MKFS_H
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,8 +40,8 @@ typedef struct {
     bool is_directory;        // Whether the file is a directory
     bool is_allocated;         // check whether this area of memory is actually in use for an inode
     uint32_t nlinks;          // Number of hard links
-    uint32_t blocks[12];      // Direct block pointers (12 direct blocks)
-    uint32_t indirect;        // Indirect block pointer
+    uint32_t direct_blocks[12];      // Direct block pointers (12 direct blocks)
+    uint32_t indirect_block;        // Indirect block pointer
 } inode_t;
 
 // VSFS Directory entry structure
@@ -70,3 +73,5 @@ int calculate_layout(char *disk_map, size_t disk_size, size_t max_files,
                     size_t *num_total_blocks, size_t *num_inode_table_blocks, size_t *num_data_blocks, 
                     size_t *num_data_bitmap_blocks, size_t *num_inode_bitmap_blocks);
 void cleanup_disk(char *disk_map, size_t disk_size, int fd);
+
+#endif // MKFS_H

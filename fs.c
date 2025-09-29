@@ -1,6 +1,5 @@
 #include "fs.h"
-#include "mkfs.h"
-#include "helpers.h"
+#include "fs_helper.h"
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -112,9 +111,9 @@ int create_file(const char *filename) {
     inode_t* root_inode = (inode_t*)(inode_table);
     root_inode->nlinks++;
     for (unsigned int i = 0; i < 12; i++) {
-        new_inode->blocks[i] = 0;    // points at 0th disk block (superblock), not 0th data block
+        new_inode->direct_blocks[i] = 0;    // points at 0th disk block (superblock), not 0th data block
     }
-    new_inode->indirect = 0;
+    new_inode->indirect_block = 0;
     sb->num_used_inodes++;
 
     return 0;
@@ -127,27 +126,102 @@ int delete_file(const char *filename) {
         printf("FAILURE: Root inode not found\n");
         return -1;
     }
+    
+    uint32_t inode_index;
+    inode_t* inode = get_inode_by_name(filename, &inode_index);
+    if (inode == NULL) {
+        printf("FAILURE: File not found\n");
+        return -1;
+    }
+    // TODO: if deleting directory, need to delete subfiles too
+
+    // update superblock
+    sb->num_used_inodes--;
+    // decrement root directory's nlinks
+    root_inode->nlinks--;
+    // set inode is_allocated to false
+    inode->is_allocated = false; 
+    // free inode
+    bitmapset(inode_bitmap, sb->num_max_inodes, inode_index, 0);
+    return 0;
+  
+}
+
+uint32_t read_file(const char *filename, char *buffer, unsigned long buffer_size) {
     // linear search through files
-    for (unsigned int i = 0; i < sb->num_max_inodes; i++) {
-        if (bitmapget(inode_bitmap, sb->num_max_inodes, i) == 1) {
-            inode_t* inode = (inode_t*)(inode_table + i * sizeof(inode_t));
-            if (strcmp(inode->name, filename) == 0) {
-                // decrement root directory's nlinks
-                root_inode->nlinks--;
-                // set inode is_allocated to false
-                inode->is_allocated = false; 
-                // free inode
-                bitmapset(inode_bitmap, sb->num_max_inodes, i, 0);
-                return 0;
+    inode_t* inode = get_inode_by_name(filename, NULL);
+    if (inode == NULL) {
+        printf("FAILURE: File not found\n");
+        return -1;
+    }
+    
+    if (inode->is_directory) {
+        printf("FAILURE: File is a directory\n");
+        return -1;
+    }
+
+    unsigned long bytes_read = 0;
+
+    // iterate through direct block pointers
+    for (unsigned int i = 0; i < 12; i++) {
+        // no more direct blocks
+        if (inode->direct_blocks[i] == 0) {
+            break;
+        }
+
+        // read block 
+        char* block = (char*)(data_section + inode->direct_blocks[i] * BLOCK_SIZE);
+
+        // copy block to buffer
+        if (bytes_read + BLOCK_SIZE <= buffer_size) {   // buffer can still fit at least one block
+            // fully copy block
+            memcpy(buffer + bytes_read, block, BLOCK_SIZE);
+            bytes_read += BLOCK_SIZE;
+        } else {    // buffer cannot fit another block
+            // partially copy block
+            memcpy(buffer + bytes_read, block, buffer_size - bytes_read);
+            bytes_read += buffer_size - bytes_read;
+            // debug
+            if (bytes_read != buffer_size) {
+                printf("WARNING: read direct block bytes does not match with buffer size \n");
+            }
+            return bytes_read;
+        }
+        
+    }
+
+    // read indirect block
+    if (inode->indirect_block != 0) {
+        uint32_t* indirect_block = (uint32_t*)(data_section + inode->indirect_block * BLOCK_SIZE);
+        for (uint32_t i = 0; i < BLOCK_SIZE / sizeof(uint32_t); i++ ) {
+            if (indirect_block[i] == 0) {
+                break;
+            }
+            char* block = (char*)(data_section + indirect_block[i] * BLOCK_SIZE);
+            if (bytes_read + BLOCK_SIZE <= buffer_size) {   // buffer can still fit at least one block
+                // copy full block
+                memcpy(buffer + bytes_read, block, BLOCK_SIZE);
+                bytes_read += BLOCK_SIZE;
+            } else {    // buffer cannot fit another block
+                // partially copy block
+                memcpy(buffer + bytes_read, block, buffer_size - bytes_read);
+                bytes_read += buffer_size - bytes_read;
+                // debug
+                if (bytes_read != buffer_size) {
+                    printf("WARNING: read indirect block bytes does not match with buffer size \n");
+                }
+                return bytes_read;
             }
         }
     }
-    printf("FAILURE: File not found\n");
-    return -1;
+
+    
+    return bytes_read;
+
 }
 
 
-int print_all_files(void) {
+unsigned int print_all_files(void) {
     unsigned int count = 0;
     for (unsigned int i = 0; i < sb->num_max_inodes; i++) {
         if (bitmapget(inode_bitmap, sb->num_max_inodes, i) == 1) {
