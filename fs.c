@@ -108,6 +108,9 @@ int create_file(const char *filename) {
     new_inode->is_directory = false;
     new_inode->is_allocated = true;
     new_inode->nlinks = 1; // root directory
+    // increment root directory's nlinks
+    inode_t* root_inode = (inode_t*)(inode_table);
+    root_inode->nlinks++;
     for (unsigned int i = 0; i < 12; i++) {
         new_inode->blocks[i] = 0;    // points at 0th disk block (superblock), not 0th data block
     }
@@ -117,14 +120,43 @@ int create_file(const char *filename) {
     return 0;
 }
 
+int delete_file(const char *filename) {
+    // get root inode
+    inode_t* root_inode = (inode_t*)(inode_table);
+    if (root_inode == NULL ||root_inode->is_allocated == false) {
+        printf("FAILURE: Root inode not found\n");
+        return -1;
+    }
+    // linear search through files
+    for (unsigned int i = 0; i < sb->num_max_inodes; i++) {
+        if (bitmapget(inode_bitmap, sb->num_max_inodes, i) == 1) {
+            inode_t* inode = (inode_t*)(inode_table + i * sizeof(inode_t));
+            if (strcmp(inode->name, filename) == 0) {
+                // decrement root directory's nlinks
+                root_inode->nlinks--;
+                // set inode is_allocated to false
+                inode->is_allocated = false; 
+                // free inode
+                bitmapset(inode_bitmap, sb->num_max_inodes, i, 0);
+                return 0;
+            }
+        }
+    }
+    printf("FAILURE: File not found\n");
+    return -1;
+}
+
+
 int print_all_files(void) {
+    unsigned int count = 0;
     for (unsigned int i = 0; i < sb->num_max_inodes; i++) {
         if (bitmapget(inode_bitmap, sb->num_max_inodes, i) == 1) {
             inode_t *inode = (inode_t*)(inode_table + i * sizeof(inode_t));
             printf("%s\n", inode->name);
+            count++;
         }
     }
-    return 0;
+    return count;
 }
 
 void unload_fs(void) {
