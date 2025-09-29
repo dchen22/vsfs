@@ -59,7 +59,7 @@ int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
     }
 
     // Write superblock
-    if (write_superblock(map, disk_size, max_files, num_total_blocks, num_inode_table_blocks, num_data_blocks, num_inode_bitmap_blocks, num_data_bitmap_blocks) < 0) {
+    if (write_superblock(map, disk_name, disk_size, max_files, num_total_blocks, num_inode_table_blocks, num_data_blocks, num_inode_bitmap_blocks, num_data_bitmap_blocks) < 0) {
         cleanup_disk(map, disk_size, fd);
         return -1;
     }
@@ -93,7 +93,7 @@ int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
     return 0;
 }
 
-int write_superblock(char *disk_map, size_t disk_size, size_t max_files, 
+int write_superblock(char *disk_map, const char *disk_name, size_t disk_size, size_t max_files, 
     size_t num_total_blocks, size_t num_inode_table_blocks, size_t num_data_blocks, 
     size_t num_inode_bitmap_blocks, size_t num_data_bitmap_blocks) {
     // TODO: Implement superblock writing
@@ -112,6 +112,8 @@ int write_superblock(char *disk_map, size_t disk_size, size_t max_files,
     sb = (superblock_t *)disk_map;
     
     // Initialize superblock fields
+    strncpy(sb->disk_name, disk_name, MAX_FILENAME_LEN);
+    sb->disk_name[MAX_FILENAME_LEN-1] = '\0';
     sb->magic = VSFS_MAGIC;
     sb->disk_size = disk_size;
     sb->block_size = BLOCK_SIZE;
@@ -122,7 +124,6 @@ int write_superblock(char *disk_map, size_t disk_size, size_t max_files,
     sb->num_inode_bitmap_blocks = num_inode_bitmap_blocks;
     sb->num_max_inodes = max_files;
     sb->num_used_inodes = 0; 
-    sb->num_free_blocks = num_data_blocks;
     sb->num_used_data_blocks = 0;
     
     return 0;

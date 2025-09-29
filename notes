@@ -1,1 +1,4 @@
 ensure adding new inodes doesn't overflow inode table into data blocks
+
+direct pointers point at blocks indexing from the start of the disk, not from the start of data section
+

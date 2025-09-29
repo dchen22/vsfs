@@ -13,18 +13,21 @@
 
 // VSFS Superblock structure
 typedef struct {
+    char disk_name[MAX_FILENAME_LEN]; // Name of the disk
     uint32_t magic;           // Magic number to identify VSFS
     uint32_t disk_size;       // Size of the disk in bytes
     uint32_t block_size;      // Size of each block
     uint32_t num_total_blocks;    // Total number of blocks in the filesystem
-    uint32_t num_inode_table_blocks;    // Number of blocks used for inodes
-    uint32_t num_data_blocks;     // Number of blocks used for data
+    
     uint32_t num_data_bitmap_blocks;   // Number of blocks used for data bitmap
-    uint32_t num_inode_bitmap_blocks;  // Number of blocks used for inode bitmap
-    uint32_t num_max_inodes;    // Maximum number of files in the filesystem
-    uint32_t num_used_inodes; // Number of used inodes
-    uint32_t num_free_blocks;     // Number of free data blocks
+    uint32_t num_data_blocks;     // Number of blocks used for data
     uint32_t num_used_data_blocks; // Number of used data blocks
+
+    uint32_t num_inode_bitmap_blocks;  // Number of blocks used for inode bitmap
+    uint32_t num_inode_table_blocks;    // Number of blocks used for inodes
+    uint32_t num_max_inodes;    // Maximum number of files in the filesystem
+
+    uint32_t num_used_inodes; // Number of used inodes
 } superblock_t;
 
 // VSFS Inode structure
@@ -56,7 +59,7 @@ extern char *data_section;
 
 // Function declarations for VSFS formatting
 int format_disk(const char *disk_name, size_t disk_size, size_t max_files);
-int write_superblock(char *disk_map, size_t disk_size, size_t max_files, 
+int write_superblock(char *disk_map, const char *disk_name, size_t disk_size, size_t max_files, 
                     size_t num_total_blocks, size_t num_inode_table_blocks, size_t num_data_blocks, 
                     size_t num_data_bitmap_blocks, size_t num_inode_bitmap_blocks);
 int initialize_inode_table();

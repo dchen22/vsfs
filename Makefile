@@ -33,7 +33,7 @@ $(TEST_FORMAT_TARGET): $(TEST_FORMAT_OBJS)
 main.o: main.c fs.h mkfs.h
 	$(CC) $(CFLAGS) -c main.c
 
-test_fs.o: test_fs.c fs.h mkfs.h
+test_fs.o: test_fs.c fs.h mkfs.h test_fs.h
 	$(CC) $(CFLAGS) -c test_fs.c
 
 test_format.o: test_format.c fs.h mkfs.h helpers.h
