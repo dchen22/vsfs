@@ -124,7 +124,6 @@ int write_superblock(char *disk_map, const char *disk_name, size_t disk_size, si
     sb->num_inode_bitmap_blocks = num_inode_bitmap_blocks;
     sb->num_max_inodes = max_files;
     sb->num_used_inodes = 0; 
-    sb->num_used_data_blocks = 0;
     
     return 0;
 }
@@ -206,8 +205,8 @@ int create_root_directory() {
     root_inode.is_directory = true;
     root_inode.is_allocated = true;
     root_inode.nlinks = 0;      // not using relative links for now
-    root_inode.direct_blocks[0] = 0;   // point at superblock to imply unused
-    root_inode.indirect_block = 0;    // point at first inode to imply unused
+    root_inode.direct_blocknums[0] = 0;   // point at superblock to imply unused
+    root_inode.indirect_blocknum = 0;    // point at first inode to imply unused
 
     if (bitmapalloc(inode_bitmap, sb->num_max_inodes) != 0) {
         return -1;

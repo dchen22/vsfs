@@ -111,9 +111,9 @@ int create_file(const char *filename) {
     inode_t* root_inode = (inode_t*)(inode_table);
     root_inode->nlinks++;
     for (unsigned int i = 0; i < 12; i++) {
-        new_inode->direct_blocks[i] = 0;    // points at 0th disk block (superblock), not 0th data block
+        new_inode->direct_blocknums[i] = 0;    // points at 0th disk block (superblock), not 0th data block
     }
-    new_inode->indirect_block = 0;
+    new_inode->indirect_blocknum = 0;
     sb->num_used_inodes++;
 
     return 0;
@@ -147,7 +147,7 @@ int delete_file(const char *filename) {
   
 }
 
-uint32_t read_file(const char *filename, char *buffer, unsigned long buffer_size) {
+uint32_t read_file(const char *filename, char *buffer, uint32_t buffer_size) {
     // linear search through files
     inode_t* inode = get_inode_by_name(filename, NULL);
     if (inode == NULL) {
@@ -165,12 +165,12 @@ uint32_t read_file(const char *filename, char *buffer, unsigned long buffer_size
     // iterate through direct block pointers
     for (unsigned int i = 0; i < 12; i++) {
         // no more direct blocks
-        if (inode->direct_blocks[i] == 0) {
+        if (inode->direct_blocknums[i] == 0) {
             break;
         }
 
         // read block 
-        char* block = (char*)(data_section + inode->direct_blocks[i] * BLOCK_SIZE);
+        char* block = (char*)(data_section + inode->direct_blocknums[i] * BLOCK_SIZE);
 
         // copy block to buffer
         if (bytes_read + BLOCK_SIZE <= buffer_size) {   // buffer can still fit at least one block
@@ -191,13 +191,13 @@ uint32_t read_file(const char *filename, char *buffer, unsigned long buffer_size
     }
 
     // read indirect block
-    if (inode->indirect_block != 0) {
-        uint32_t* indirect_block = (uint32_t*)(data_section + inode->indirect_block * BLOCK_SIZE);
+    if (inode->indirect_blocknum != 0) {
+        uint32_t* indirect_blocknum = (uint32_t*)(data_section + inode->indirect_blocknum * BLOCK_SIZE);
         for (uint32_t i = 0; i < BLOCK_SIZE / sizeof(uint32_t); i++ ) {
-            if (indirect_block[i] == 0) {
+            if (indirect_blocknum[i] == 0) {
                 break;
             }
-            char* block = (char*)(data_section + indirect_block[i] * BLOCK_SIZE);
+            char* block = (char*)(data_section + indirect_blocknum[i] * BLOCK_SIZE);
             if (bytes_read + BLOCK_SIZE <= buffer_size) {   // buffer can still fit at least one block
                 // copy full block
                 memcpy(buffer + bytes_read, block, BLOCK_SIZE);
@@ -218,6 +218,73 @@ uint32_t read_file(const char *filename, char *buffer, unsigned long buffer_size
     
     return bytes_read;
 
+}
+
+uint32_t write_file(const char *filename, const char *buffer, uint32_t buffer_size) {
+    inode_t* inode = get_inode_by_name(filename, NULL);
+    if (inode == NULL) {
+        printf("FAILURE: File not found\n");
+        return 0;
+    }
+
+    if (inode->is_directory) {
+        printf("FAILURE: File is a directory\n");
+        return 0;
+    }
+
+    uint32_t bytes_written = 0;
+    int available_data_block_index = -1;
+
+    inode->size = 0; // reset file size, it is being overwritten
+
+    // iterate through direct block pointers
+    for (unsigned int i = 0; i < 12; i++) {
+        available_data_block_index = bitmapalloc(data_bitmap, sb->num_data_blocks);
+        if (available_data_block_index < 0) {
+            printf("WRITE_FILE FAILURE: No more available data blocks\n");
+            return -1;
+        }
+        inode->direct_blocknums[i] = available_data_block_index;   // update direct block pointer
+
+        // if less than one block was written, all data was written (or error occurred)
+        if (write_to_datablock(inode, available_data_block_index, buffer, buffer_size, &bytes_written) < BLOCK_SIZE) {
+            return bytes_written;
+        }
+    }
+
+    uint32_t remaining_blocks = ceildiv(buffer_size - bytes_written, BLOCK_SIZE);
+
+    // if more blocks to write, allocate an indirect block
+    if (remaining_blocks > 0) {
+        available_data_block_index = bitmapalloc(data_bitmap, sb->num_data_blocks);
+        if (available_data_block_index < 0) {
+            printf("WRITE_FILE FAILURE: No more available data blocks\n");
+            return -1;
+        }
+        inode->indirect_blocknum = available_data_block_index;
+    }
+
+    // allocate data blocks, write to them and track them in indirect block
+    for (uint32_t i = 0; i < remaining_blocks; i++) {
+        // allocate a data block and write to it
+        available_data_block_index = bitmapalloc(data_bitmap, sb->num_data_blocks);
+        if (available_data_block_index < 0) {
+            printf("WRITE_FILE FAILURE: No more available data blocks\n");
+            return -1;
+        }
+
+        // track data block in indirect block
+        uint32_t* indirect_block = (uint32_t*)(data_section + inode->indirect_blocknum * BLOCK_SIZE);
+        indirect_block[i] = available_data_block_index;
+
+        // if less than one block was written, all data was written (or error occurred)
+        if (write_to_datablock(inode, available_data_block_index, buffer, buffer_size, &bytes_written) < BLOCK_SIZE) {
+            return bytes_written;
+        }
+        
+    }
+
+    return bytes_written;
 }
 
 
@@ -265,11 +332,11 @@ void print_fs_status(void) {
     printf("  Total blocks: %u blocks\n", sb->num_total_blocks);
     printf("  Inode size: %lu\n", sizeof(inode_t));
     printf("  Max files: %u\n", sb->num_max_inodes);
-    printf("  Reserved blocks: %u\n", 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks + sb->num_inode_table_blocks + sb->num_used_data_blocks);
+    printf("  Reserved blocks: %u\n", 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks + sb->num_inode_table_blocks + 0);
     printf("    Breakdown: \n");
     printf("      Superblock: 1\n");
     printf("      Inode bitmap: %u\n", sb->num_inode_bitmap_blocks);
     printf("      Data bitmap: %u\n", sb->num_data_bitmap_blocks);
     printf("      Inode table: %u\n", sb->num_inode_table_blocks);
-    printf("      Data section: %u\n", sb->num_used_data_blocks);
+    printf("      Data section: 0\n");
 }

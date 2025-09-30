@@ -24,7 +24,6 @@ typedef struct {
     
     uint32_t num_data_bitmap_blocks;   // Number of blocks used for data bitmap
     uint32_t num_data_blocks;     // Number of blocks used for data
-    uint32_t num_used_data_blocks; // Number of used data blocks
 
     uint32_t num_inode_bitmap_blocks;  // Number of blocks used for inode bitmap
     uint32_t num_inode_table_blocks;    // Number of blocks used for inodes
@@ -40,8 +39,8 @@ typedef struct {
     bool is_directory;        // Whether the file is a directory
     bool is_allocated;         // check whether this area of memory is actually in use for an inode
     uint32_t nlinks;          // Number of hard links
-    uint32_t direct_blocks[12];      // Direct block pointers (12 direct blocks)
-    uint32_t indirect_block;        // Indirect block pointer
+    uint32_t direct_blocknums[12];      // Direct block pointers (12 direct blocks)
+    uint32_t indirect_blocknum;        // Indirect block pointer
 } inode_t;
 
 // VSFS Directory entry structure
