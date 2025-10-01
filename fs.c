@@ -133,6 +133,10 @@ int delete_file(const char *filename) {
         printf("FAILURE: File not found\n");
         return -1;
     }
+    if (inode_index == 0) {
+        printf("FAILURE: Cannot delete root directory\n");
+        return -1;
+    }
     // TODO: if deleting directory, need to delete subfiles too
 
     // update superblock
