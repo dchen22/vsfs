@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include "fs_helper.h"
 
 
 // Function declarations for VSFS filesystem operations
@@ -11,17 +12,20 @@ void unload_fs(void);
 /**
  * Create a file 
  * 
+ * @param parent Pointer to parent directory
  * @param filename The name of the file to create
+ * @param is_directory Whether this file is a directory (otherwise, it's a file)
  * @return 0 on success, -1 on failure
  */
-int create_file(const char *filename);
+int create_file(inode_t* parent, const char *filename, bool is_directory);
 /**
  * Delete a file 
  * 
+ * @param parent Pointer to parent directory
  * @param filename The name of the file to delete
  * @return 0 on success, -1 on failure
  */
-int delete_file(const char *filename);
+int delete_file(inode_t* parent, const char *filename);
 
 /**
  * Read a file's contents into a buffer

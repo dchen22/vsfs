@@ -1,6 +1,7 @@
 #include "helpers.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // Ceiling division: returns the smallest integer >= a/b
 int ceildiv(int a, int b) {
@@ -89,36 +90,88 @@ int bitmapclear(char *bitmap, size_t nbits) {
 }
 
 // Find the first available bit, set it to 1, and return its index
-int bitmapalloc(char *bitmap, size_t nbits) {
+uint32_t bitmapalloc(char *bitmap, size_t nbits) {
     // Error checking
     if (bitmap == NULL) {
         fprintf(stderr, "bitmapalloc: bitmap is NULL\n");
-        return -1;
+        return 0;
     }
     
     if (nbits == 0) {
         fprintf(stderr, "bitmapalloc: nbits is 0\n");
-        return -1;
+        return 0;
     }
     
-    // Search for the first free bit (0)
-    for (size_t i = 0; i < nbits; i++) {
+    // Search for the first free bit (0), starting from index 1 (skip first bit)
+    for (size_t i = 1; i < nbits; i++) {
         int bit_value = bitmapget(bitmap, nbits, i);
         if (bit_value < 0) {
             fprintf(stderr, "bitmapalloc: error reading bit %zu\n", i);
-            return -1;
+            return 0;
         }
         
         if (bit_value == 0) {
             // Found a free bit, set it to 1
             if (bitmapset(bitmap, nbits, i, true) < 0) {
                 fprintf(stderr, "bitmapalloc: error setting bit %zu\n", i);
-                return -1;
+                return 0;
             }
-            return (int)i;  // Return the index of the allocated bit
+            return (uint32_t)i;  // Return the index of the allocated bit
         }
     }
     
     // No free bits found
-    return -1;
+    return 0;
 }
+
+
+void free_split(char **parts)
+{
+    if (!parts) return;
+    for (size_t i = 0; parts[i]; ++i) free(parts[i]);
+    free(parts);
+}
+
+char **split_path(const char *path)
+/* Returns a NULL-terminated array of malloc'd strings.
+   Caller must free with free_split(parts). On error, returns NULL. */
+{
+    if (!path) return NULL;
+
+    // 1) Count segments
+    size_t n = 0;
+    const char *p = path;
+    while (*p) {
+        while (*p == '/') ++p;                   // skip slashes
+        if (!*p) break;
+        while (*p && *p != '/') ++p;             // consume segment
+        ++n;
+    }
+
+    // Allocate array of pointers (+1 for NULL terminator)
+    char **parts = malloc((n + 1) * sizeof *parts);
+    if (!parts) return NULL;
+
+    // 2) Fill segments
+    p = path;
+    size_t i = 0;
+    while (*p) {
+        while (*p == '/') ++p;
+        if (!*p) break;
+        const char *start = p;
+        while (*p && *p != '/') ++p;
+        size_t len = (size_t)(p - start);
+
+        char *seg = malloc(len + 1);
+        if (!seg) {
+            free_split(parts);
+            return NULL;
+        }
+        memcpy(seg, start, len);
+        seg[len] = '\0';
+        parts[i++] = seg;
+    }
+    parts[i] = NULL;
+    return parts;
+}
+

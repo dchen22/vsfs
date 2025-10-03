@@ -10,6 +10,7 @@
 
 // Global filesystem pointers
 superblock_t *sb = NULL;
+char *disk_start = NULL;
 char *inode_bitmap = NULL;
 char *data_bitmap = NULL;
 char *inode_table = NULL;
@@ -17,6 +18,8 @@ char *data_section = NULL;
 
 int format_disk(const char *disk_name, size_t disk_size, size_t max_files) {
     assert(sizeof(superblock_t) <= BLOCK_SIZE);   // superblock needs to fit in a block
+    assert(sizeof(inode_t) <= BLOCK_SIZE);
+    assert(sizeof(uint32_t) <= BLOCK_SIZE);
 
     if (disk_size < 2 * BLOCK_SIZE) {   // superblock and at least 1 bitmap block
         fprintf(stderr, "Disk size is too small\n");
@@ -156,7 +159,7 @@ int initialize_data_bitmap() {
     }
     
     // Mark block 0 (superblock) and both bitmaps' blocks as used
-    for (size_t i = 0; i < 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks; i++) {
+    for (size_t i = 0; i < 1 + sb->num_inode_bitmap_blocks + sb->num_data_bitmap_blocks + sb->num_inode_table_blocks; i++) {
         // debug
         if (sb->num_total_blocks <= i) {
             printf("debug");
@@ -187,35 +190,36 @@ int initialize_inode_bitmap() {
 int create_root_directory() {
     // TODO: Implement root directory creation
     // - Allocate first data block for root directory
-    // - Set up inode 0 as directory inode
+    // - Set up inode 1 as directory inode
     // - Set mode to directory (S_IFDIR)
     // - Set size to BLOCK_SIZE
     // - Set nlinks to 2 (for . and .. entries)
     // - Set timestamps to current time
     // - Create . and .. directory entries
     // - Update data bitmap to mark allocated block as used
-    // - Update superblock next_free_inode to 1 (since inode 0 is now used)
+    // - Update superblock next_free_inode to 2 (since inode 1 is now used)
     // - Return 0 on success, -1 on error
 
     assert(sb->num_used_inodes < sb->num_max_inodes);
 
-    inode_t root_inode;
-    strcpy(root_inode.name, "root");
-    root_inode.size = 0;
-    root_inode.is_directory = true;
-    root_inode.is_allocated = true;
-    root_inode.nlinks = 0;      // not using relative links for now
-    root_inode.direct_blocknums[0] = 0;   // point at superblock to imply unused
-    root_inode.indirect_blocknum = 0;    // point at first inode to imply unused
+    inode_t* root_inode = (inode_t*)inode_table;
+    strcpy(root_inode->name, "root");
+    root_inode->size = 0;
+    root_inode->is_directory = true;
+    root_inode->is_allocated = true;
+    root_inode->nlinks = 0;      // not using relative links for now
 
-    if (bitmapalloc(inode_bitmap, sb->num_max_inodes) != 0) {
+    if (bitmapset(inode_bitmap, sb->num_max_inodes, 0, true) < 0) {
         return -1;
     }
-    memcpy(inode_table, &root_inode, sizeof(root_inode));
+    // memcpy(inode_table, &root_inode, sizeof(root_inode));
     sb->num_used_inodes++;
 
-    // Mark inode 0 as used in the inode bitmap (already done in initialize_inode_bitmap)
-    // No need to do it again here
+    // initialize direct and indirect blocks
+    for (uint32_t i = 0; i < 12; i++) {
+        root_inode->direct_blocknums[i] = 0;
+    }
+    root_inode->indirect_blocknum = 0;
 
     return 0;
 }

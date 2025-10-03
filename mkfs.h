@@ -43,17 +43,18 @@ typedef struct {
     uint32_t indirect_blocknum;        // Indirect block pointer
 } inode_t;
 
-// VSFS Directory entry structure
-typedef struct {
-    uint32_t inode;           // Inode number
-    uint16_t rec_len;         // Record length
-    uint8_t name_len;         // Name length
-    uint8_t file_type;        // File type
-    char name[MAX_FILENAME_LEN]; // File name
-} dirent_t;
+// // VSFS Directory entry structure
+// typedef struct {
+//     uint32_t inode;           // Inode number
+//     uint16_t rec_len;         // Record length
+//     uint8_t name_len;         // Name length
+//     uint8_t file_type;        // File type
+//     char name[MAX_FILENAME_LEN]; // File name
+// } dirent_t;
 
 // Global filesystem pointers
 extern superblock_t *sb;
+extern char *disk_start;
 extern char *inode_bitmap;
 extern char *data_bitmap;
 extern char *inode_table;
